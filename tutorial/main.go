@@ -2,8 +2,9 @@
 package main
 
 import (
-	// Делает пакет fmt (формат) доступным для использования
-	"fmt"
+	"fmt" // Делает пакет fmt (формат) доступным для использования
+	"math/rand"
+	"strings"
 )
 
 func f1() {
@@ -92,7 +93,56 @@ func f10() {
 	fmt.Println(age)
 }
 
+func f11() {
+	var num = rand.Intn(10) + 1
+	fmt.Println(num)
+
+	num = rand.Intn(10) + 1
+	fmt.Println(num)
+}
+
+/*
+Расстояние между Землей и Марсом в разное время отличается и зависит от того,
+где планеты в данный конкретный момент времени находятся на орбите Солнца.
+Напишите программу для генерации случайного расстояния в промежутке от 56 000 000 до 401 000 000 км.
+*/
+func f12() {
+	var distance = rand.Intn(401_000_000-56_000_000) + 56_000_000
+	fmt.Println(distance)
+}
+
+/*
+Напишите программу, которая посчитает, как быстро должна передвигаться ракета (км/ч),
+чтобы добраться до Марса за 28 дней.
+Предположим, что расстояние от Земли до Марса равно 56 000 000 км.
+*/
+func f13() {
+	const hoursPerDay = 24
+
+	var days = 28
+	var distance = 56_000_000 // km
+
+	fmt.Println(distance/(days*hoursPerDay), "км/ч")
+}
+
+func f14() {
+	var (
+		walkOutside     = true
+		takeTheBluePill = false
+	)
+	fmt.Printf("%v %v", walkOutside, takeTheBluePill)
+}
+
+func f15() {
+	fmt.Println("Вы находитесь в темной пещере.")
+
+	var command = "выйти наружу"
+	var exit = strings.Contains(command, "наружу")
+
+	fmt.Println("Вы покидаете пещеру:", exit) // Выводит: Вы покидаете пещеру: true
+}
+
 // main является функцией, с которой все начинается
 func main() {
-	f10()
+	f15()
 }
