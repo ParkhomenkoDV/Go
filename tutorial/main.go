@@ -1235,7 +1235,7 @@ func f67() {
 */
 
 func f68() {
-	future := time.Unix(12622780800, 0)
+	future := time.Unix(12_622_780_800, 0)
 	fmt.Println(future) // Выводит: 2370-01-01 00:00:00 +0000 UTC
 }
 
@@ -1250,25 +1250,32 @@ func f68() {
 */
 
 func f69() {
-    piggyBank := 0
- 
-    for piggyBank < 2000 {
-        switch rand.Intn(3) {
-        case 0:
-            piggyBank += 5
-        case 1:
-            piggyBank += 10
-        case 2:
-            piggyBank += 25
-        }
- 
-        dollars := piggyBank / 100
-        cents := piggyBank % 100
-        fmt.Printf("$%d.%02d\n", dollars, cents)
-    }
+	piggyBank := 0
+
+	for piggyBank < 2000 {
+		switch rand.Intn(3) {
+		case 0:
+			piggyBank += 5
+		case 1:
+			piggyBank += 10
+		case 2:
+			piggyBank += 25
+		}
+
+		dollars := piggyBank / 100
+		cents := piggyBank % 100
+		fmt.Printf("$%d.%02d\n", dollars, cents)
+	}
+}
+
+func f() {
+	var s string = "123"
+	var r rune = 123
+	fmt.Printf("%v", s)
+	fmt.Printf("%v", r)
 }
 
 // main является функцией, с которой все начинается
 func main() {
-	f69()
+	f()
 }
