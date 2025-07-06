@@ -2066,3 +2066,556 @@ func main() {
 }
 ```
 
+`in.json`
+```json
+{
+    "id": 1,
+    "name": "Ivan",
+    "surname": "Ivanov",
+    "salary_flag": 1,
+    "address": {
+        "land": "Russia",
+        "city": "Moscow",
+        "district": "Butovo"
+    },
+    "phones": [
+        {
+            "operator": "MTS",
+            "number": 89850000001
+        },
+        {
+            "operator": "МегаФон",
+            "number": 89850000002
+        }
+    ],
+    "scores": {
+        "score_1": [
+            1,
+            2,
+            3
+        ],
+        "score_2": [
+            4,
+            5,
+            30,
+            6,
+            24
+        ]
+    }
+}
+```
+
+`out.json`
+```json
+{
+    "id": 1,
+    "name": "Ivan",
+    "surname": "Ivanov",
+    "salary_flag": 1,
+    "address": {
+        "land": "Russia",
+        "city": "Moscow",
+        "district": "Butovo"
+    },
+    "phones": [
+        {
+            "operator": "MTS",
+            "number": 89850000001
+        },
+        {
+            "operator": "МегаФон",
+            "number": 89850000002
+        }
+    ],
+    "scores": {
+        "score_1": [
+            1,
+            2,
+            3
+        ],
+        "score_2": [
+            4,
+            5,
+            30,
+            6,
+            24
+        ]
+    }
+}
+```
+
+# Интерфейсы
+
+**Интерфейс** = контракт, в котором указываются методы, но не указываются поля.
+
+Структуры `Square` и `Circle` имплементируют интерфейс `Shape`, т.к. каждая имеет метод с такой же сигнатурой.
+
+```go
+package main
+
+import (
+    "fmt"
+    "math"
+)
+
+// Shape - интерфейс фигуры.
+type Shape interface {
+    Area() float64
+}
+
+//------------------------------
+
+// Square - структура квадрата.
+type Square struct {
+    side float64
+}
+
+// NewSquare - конструктор, возвращающий тип интерфейса.
+func NewSquare(side float64) Shape { // возвращвет интерфейс, а не Square!
+    return &Square{side: side}
+}
+
+// Area - метод вычисления площади квадрата.
+func (s *Square) Area() float64 {
+    return s.side * s.side
+}
+
+//------------------------------
+
+// Circle - структура круга.
+type Circle struct {
+    radius float64
+}
+
+// NewCircle - конструктор, возвращающий тип интерфейса.
+func NewCircle(radius float64) Shape { // возвращвет интерфейс, а не Circle!
+    return &Circle{radius: radius}
+}
+
+// Area - метод вычисления площади круга.
+func (c *Circle) Area() float64 {
+    return c.radius * c.radius * math.Pi
+}
+
+//------------------------------
+
+// ShapeArea - универсальная функция вычисления площади.
+func ShapeArea(shape Shape) float64 {
+    return shape.Area()
+}
+
+func main() {
+    // создание объектов интерфейса Shape
+    square := NewSquare(123)
+    circle := NewCircle(33)
+    
+    fmt.Println(square.Area()) // 15129
+    fmt.Println(circle.Area()) // 3421.194399759285
+    
+    // вызов методов вычисления площади
+    fmt.Println(ShapeArea(square)) // 15129
+    fmt.Println(ShapeArea(circle)) // 3421.194399759285
+    
+    // слайс объектов интерфейса
+    slOfShapes := []Shape{square, circle} // = полиморфизм (список с разными типами структур)
+    
+    for _, shape := range slOfShapes {
+        fmt.Println(shape.Area())
+    }
+    // 15129
+    // 3421.194399759285
+    
+    for _, shape := range slOfShapes {
+        fmt.Println(ShapeArea(shape))
+    }
+    // 15129
+    // 3421.194399759285
+}
+```
+
+## Приведение типов. Пустой интерфейс
+
+```go
+package main
+
+import (
+    "fmt"
+)
+
+// Runner - интерфейс.
+type Runner interface {
+    Run()
+}
+
+type Dog struct {
+    Name string
+}
+
+func (d *Dog) Run() {
+    fmt.Println("Dog runs")
+}
+
+type Cat struct {
+    Name string
+}
+
+func (c *Cat) Run() {
+    fmt.Println("Cat runs")
+}
+
+// TypeAssertion - функция приведения типов.
+// Можно использовать тип runner - Runner, но тогда не получится проверить типы int и string
+// так как они не реализуют интерфейс Runner.
+// Используем универсальное решение - пустой интерфейс, который реализуют ВСË, но это черевато ошибками и ресурсом
+func TypeAssertion(runner interface{}) {
+    switch v := runner.(type) {
+    case *Dog:
+        v.Run()
+    case *Cat:
+        v.Run()
+    case int:
+        fmt.Println("это int")
+    case string:
+        fmt.Println("это string")
+    default:
+        fmt.Println("незнакомый тип")
+    }
+}
+
+func main() {
+    // создание объекта интерфейса Runner
+    var r Runner
+    fmt.Printf("Type: %T Value: %#v\n", r, r) // Type: <nil> Value: <nil>
+    
+    // инициализация структуры Dog через интерфейс, который она реализует
+    r = &Dog{Name: "dog"}
+    fmt.Printf("Type: %T Value: %#v\n", r, r) // Type: *t.Dog Value: &t.Dog{Name:"dog"}
+    TypeAssertion(r)
+    
+    // инициализация структуры Cat через интерфейс, который она реализует
+    r = &Cat{Name: "cat"}
+    fmt.Printf("Type: %T Value: %#v\n", r, r) // Type: *t.Cat Value: &t.Cat{Name:"cat"}
+    TypeAssertion(r)
+    
+    // проверка остальных типов
+    TypeAssertion(111)   // это int
+    TypeAssertion("111") // это string
+    TypeAssertion(true)  // незнакомый тип
+}
+```
+
+# Наследование = Встраивание (Embedding). 
+
+## Пример 1
+
+```go
+package main
+
+import "fmt"
+
+// Parent - родительская структура.
+type Parent struct {
+    ParentField int
+}
+
+// Hello - Родительский метод.
+func (p *Parent) Hello() {
+    fmt.Println("Parent func 'hello'")
+}
+
+// Child - Структура наследника.
+type Child struct {
+    Parent     // встраиваем
+    ChildField int
+}
+
+// Hello - Метод наследника.
+func (c *Child) Hello() {
+    fmt.Println("Child func 'hello'")
+}
+
+func main() {
+    ch := Child{
+        Parent:     Parent{ParentField: 1111},
+        ChildField: 2222,
+    }
+    
+    fmt.Println(ch.Parent.ParentField) // 1111
+    ch.Hello()                         // Child func 'hello'
+    ch.Parent.Hello()                  // Parent func 'hello'
+}
+```
+
+## Пример 2. Pattern Builder
+
+```go
+package main
+
+import (
+    "fmt"
+)
+
+// Decider - интерфейс выбора пути рассчета.
+type Decider interface {
+    LoanCalc()
+}
+
+// Customer - клиент.
+type Customer struct {
+    Name string
+    Age  int
+}
+
+// WalkIn - клиент улица.
+type WalkIn struct {
+    Customer
+}
+
+// LoanCalc - расчет кредита для улицы.
+func (w WalkIn) LoanCalc() {
+    fmt.Println("Расчет для улицы")
+}
+
+// Salary - клиент зп.
+type Salary struct {
+    Customer
+}
+
+// LoanCalc - расчет кредита для зарплатника.
+func (s Salary) LoanCalc() {
+    fmt.Println("Расчет для зарплатника")
+}
+
+// Pension - клиент пенсионер.
+type Pension struct {
+    Customer
+}
+
+// LoanCalc - расчет кредита для пенсионера.
+func (p Pension) LoanCalc() {
+    fmt.Println("Расчет для пенсионера")
+}
+
+// Decision - структура со встроенным интерфейсом.
+type Decision struct {
+    Strategy string
+    Decider
+}
+
+// New - универсальный конструктор для создания всех типов клиентов.
+func New(strategy string, customer Decider) *Decision {
+    return &Decision{
+        Strategy: strategy,
+        Decider:  customer,
+    }
+}
+
+func main() {
+    // Встраивание. Клиент Улица.
+    walkInCustomer := New(
+        "Улица",
+        WalkIn{
+            Customer: Customer{
+                Name: "walkin customer",
+                Age:  30,
+            },
+        },
+    )
+    walkInCustomer.LoanCalc()
+    
+    // Встраивание. Клиент Зарплатник
+    salaryCustomer := New(
+        "Зарплата",
+        Salary{
+            Customer: Customer{
+                Name: "salary customer",
+                Age:  40,
+            },
+        },
+    )
+    salaryCustomer.LoanCalc()
+    
+    // Встраивание. Клиент пенсионер
+    pensCustomer := New(
+        "Пенсия",
+        Pension{
+            Customer: Customer{
+                Name: "pension customer",
+                Age:  70,
+            },
+        },
+    )
+    pensCustomer.LoanCalc()
+}
+```
+
+## Пример 2. Pattern Builder. Правильная иерархия
+
+`choicer.go`
+```go
+package usecase4
+
+type Strategy struct {
+	WalkIn  WalkIn
+	Salary  Salary
+	Pension Pension
+}
+
+func NewStrategy() *Strategy {
+	return &Strategy{
+		WalkIn:  NewWalkIn(),
+		Salary:  NewSalary(),
+		Pension: NewPension(),
+	}
+}
+```
+
+`customer.go`
+```go
+package usecase4
+
+// Customer - клиент.
+type Customer struct {
+	Name string
+	Age  int
+}
+```
+
+`pension.go`
+```go
+package usecase4
+
+import "fmt"
+
+type Pension interface {
+	PrintPension()
+	GetPensionParams() (string, int)
+}
+
+type PensionStruct struct {
+	Customer
+}
+
+func NewPension() Pension {
+	return &PensionStruct{
+		Customer{
+			Name: "Pension",
+			Age:  70,
+		},
+	}
+}
+
+func (s *PensionStruct) PrintPension() {
+	fmt.Println("This is PensionStruct method")
+}
+
+func (s *PensionStruct) GetPensionParams() (string, int) {
+	fmt.Println("Pension params")
+	return s.Name, s.Age
+}
+```
+
+`salary.go`
+```go
+package usecase4
+
+import "fmt"
+
+type Salary interface {
+	PrintSalary()
+	GetSalaryParams() (string, int)
+}
+
+type SalaryStruct struct {
+	Customer
+}
+
+func NewSalary() Salary {
+	return &SalaryStruct{
+		Customer{
+			Name: "Salary",
+			Age:  40,
+		},
+	}
+}
+
+func (s *SalaryStruct) PrintSalary() {
+	fmt.Println("This is SalaryStruct method")
+}
+
+func (s *SalaryStruct) GetSalaryParams() (string, int) {
+	fmt.Println("Salary params")
+	return s.Name, s.Age
+}
+```
+
+`walkin.go`
+```go
+package usecase4
+
+import "fmt"
+
+type WalkIn interface {
+	PrintWalkIn()
+	GetWalkInParams() (string, int)
+}
+
+type WalkInStruct struct {
+	Customer
+}
+
+func NewWalkIn() WalkIn {
+	return &WalkInStruct{
+		Customer{
+			Name: "WalkIn",
+			Age:  20,
+		},
+	}
+}
+
+func (w *WalkInStruct) PrintWalkIn() {
+	fmt.Println("This is WalkInStruct method")
+}
+
+func (w *WalkInStruct) GetWalkInParams() (string, int) {
+	fmt.Println("WalkIn params")
+	return w.Name, w.Age
+}
+```
+
+# Подробнее про ошибки
+
+`error` = интерфейс с 1 методом:
+```go
+type error interface {
+    Error() string
+}
+```
+
+```go
+// CustomError - структура кастомной ошибки.
+type CustomError struct {
+	Err string
+}
+
+// Error - метод, реализующий интерфейс Error.
+func (c *CustomErr) Error() string {
+	return c.Err
+}
+
+func main() {
+    err1 := CustomError{
+        Err: "error1",
+    }
+    res := err1.Error()
+    fmt.Println(res) // error1
+
+    err2 := errors.New("error2")
+    res := err2.Error()
+    fmt.Println(res) // error2
+}
+```
+
+
+
+
