@@ -1294,6 +1294,8 @@ func main() {
     
     var sl3 = []int{1, 2, 3}
     fmt.Println(sl3) // [1 2 3]
+
+    fmt.Println(sl3[3]) // panic = выход за границу массива
 }
 ```
 
@@ -2616,6 +2618,321 @@ func main() {
 }
 ```
 
+# Словари = Карты = map
 
+map = хэш-таблицв, где есть ключ-значение.
+1. берется хэш от ключа
+2. считается отстаток от деления хэша пункта 1. на количество бакетов
+3. по полученному значени. пункта 2. как по индексу массива кладется значение
+
+Колизия = ситуация, при которой хэш от разных значений совпадает => проблема => 
+- метод цепочек (бакет = связный список, т.е. массив, который не последователен в ячейках памяти)
+- метод открытой адресации (кладется колизия в пустой бакет справа)
+
+В Go используется метод цепочек. В каждом бакете должно быть около 6.5 значений. При увеличении данного значения каждый раз при обращении в хэш-таблицу автоматически аллоцируется новая память и таким образом потихоньку переписыватеся в новую хэш-таблицу.
+
+## Инициализация Map (словаря)
+```go
+package main
+
+import "fmt"
+
+func main() {
+    // Вариант с make
+    dct1 := make(map[string]int)
+    fmt.Printf("dct1:%v, len:%v\n", dct1, len(dct1)) // dct1:map[], len:0
+    
+    // 5 = вместимость (cap), как у slice, но такого параметра нет! len = 0
+    dct2 := make(map[string]int, 5)
+    fmt.Printf("dct1:%v, len:%v\n", dct2, len(dct2)) // dct1:map[], len:0
+    
+    // Инициализация со значениями
+    dct3 := map[string]int{
+        "Ivanov": 1,
+        "Petrov": 2,
+    }
+    fmt.Printf("dct3:%v, len:%v\n", dct3, len(dct3)) // dct3:map[Ivanov:1 Petrov:2], len:2
+
+    dct4 := map[string]float64{} // фигурные скобки обязательны!
+    fmt.Printf("dct4:%v, len:%v\n", dct4, len(dct4)) // dct4:map[], len:0
+    dct4["a"] = 1.0
+    fmt.Printf("dct4:%v, len:%v\n", dct4, len(dct4)) // dct4:map[a:1.0], len:1
+
+    var dct5 map[string]float64 // нет фигурных скобок => бестолковый способ! т.к. см. ниже
+    fmt.Printf("dct5:%v, len:%v\n", dct5, len(dct5)) // dct5:map[], len:0
+    dct5["a"] = 1.0 // panic    
+}
+```
+
+## Получение, добавление, удаление 
+
+```go
+package main
+
+import (
+    "fmt"
+    "log"
+)
+
+func main() {
+    dct := make(map[string]int)
+    fmt.Printf("dct:%v\n", dct) // dct:map[]
+    
+    // вставка значения по ключу
+    dct["Ivanov"] = 1
+    dct["Petrov"] = 2
+    fmt.Printf("dct:%v\n", dct) // dct:map[Ivanov:1 Petrov:2]
+    
+    // НЕБЕЗОПАСНОЕ получение значения по ключу
+    getFromMap := dct["Petrov"]
+    fmt.Println(getFromMap) // 2
+    // Если в мапе нет значения по ключу, то вернется дефолтное значение типа
+    wtf := dct["Sidorov"]
+    fmt.Println(wtf) // вернется дефольное значение типа int = 0 !!!
+
+    // Безопасное получение значения по ключу
+    value1, ok := dct["Petrov"] // в bool переменную 'ok' будет записан true, в случае находжения ключа
+    if !ok {
+        log.Fatalln("пользователя нет в словаре")
+    }
+    fmt.Println(value1) // 2
+    value2, ok := dct["Who are U?"]
+    if !ok {
+        log.Fatalln("пользователя нет в словаре")
+    }
+    fmt.Println(value2) // пользователя нет в словаре
+    
+    // изменение значения по ключу
+    dct["Ivanov"] = 1_000
+    fmt.Printf("dct:%v\n", dct) // dct:map[Ivanov:1000 Petrov:2]
+    
+    // удаление значения по ключу
+    delete(dct, "Petrov")
+    fmt.Printf("dct:%v\n", dct) // dct:map[Ivanov:1000]
+}
+```
+
+## Итерирование
+```go
+package main
+
+import (
+    "fmt"   
+)
+
+func main() {
+    dct := map[string]int{
+        "Ivanov": 1,
+        "Petrov": 2,
+    }
+    
+    for k, v := range dct {
+        fmt.Printf("key: %v, value: %v\n", k, v)
+    }
+    // key: Ivanov, value: 1
+    // key: Petrov, value: 2
+    // порядок НЕ гаратнирован!!!
+}
+```
+
+## Использование в map разных типов данных 
+Тип пустой интерфейс (`interface{}`) дает возможность записывать в map данные разных типов.
+Но, появляется необходимость приведения типа значения при работе с конкретной парой, что создает неудобство.
+Для разных типов данных принято использовать **структуры**.
+
+```go
+package main
+
+import (
+    "fmt"
+)
+
+func main() {
+    // Тип пустой интерфейс дает возможность записывать в мапу данные разных типов
+    dct := map[string]interface{}{
+        "Name":    "Ivan",
+        "Surname": "Ivanov",
+        "Age":     30,
+        "Married": true,
+    }
+    
+    for k, v := range dct {
+        fmt.Println(k, v)
+    }
+    
+    // неудобство приведения типа
+    if dct["Age"].(int) == 30 {
+        fmt.Println("ok")
+    }
+}
+```
+
+```go
+package main
+
+import (
+	"fmt"
+)
+
+func main() {
+    // мапа с разными типами значений
+    dct := map[string]interface{}{
+        "Name":    "Ivan",
+        "Surname": "Ivanov",
+        "Age":     30,
+        "Married": true,
+    }
+    
+    // приведение типа
+    for _, v := range dct {
+        switch v.(type) {
+        case int:
+            fmt.Printf("type: int, val: %d\n", v)
+        case float64:
+            fmt.Printf("type: float, val: %f\n", v)
+        case string:
+            fmt.Printf("type: string, val: %s\n", v)
+        default:
+            fmt.Printf("незнакомый тип, val: %v\n", v)
+        }
+    }
+}
+```
+
+## usecase 1. Unique
+
+```go
+package usecase1
+
+type User struct {
+	Id   int
+	Name string
+}
+
+// UniqueUsers - Фильтрации по уникальным именам.
+func UniqueUsers() map[int]User {
+	users := []User{
+		{Id: 1, Name: "Sasha"},
+		{Id: 222, Name: "Petya"},
+		{Id: 3, Name: "Andrey"},
+		{Id: 222, Name: "Petya"},
+		{Id: 4, Name: "Sergei"},
+	}
+
+	uniqueUsers := make(map[int]User)
+
+	for _, user := range users {
+		if _, ok := uniqueUsers[user.Id]; !ok {
+			uniqueUsers[user.Id] = user
+		}
+	}
+
+	// map[1:{1 Sasha} 3:{3 Andrey} 4:{4 Sergei} 222:{222 Petya}]
+	return uniqueUsers
+}
+```
+
+## usecase 2.
+
+```go
+package usecase2
+
+// Справочник
+var pilotCategories = []string{"walkIn", "salary"}
+
+type Customer struct {
+	Name  string
+	Score int
+}
+
+// MostScore - Поиск клиента с максимальным скором.
+func MostScore(data map[string][]Customer) Customer {
+	// клиент с максимальным скором
+	var mostScoreCustomer Customer
+
+	for _, category := range pilotCategories {
+		// проверка на категорию
+		customers, ok := data[category]
+		if !ok { // перебор только интересующих категорий
+			continue
+		}
+		// поиск клиента с максимальным скором
+		for _, customer := range customers {
+			if customer.Score > mostScoreCustomer.Score {
+				mostScoreCustomer = customer
+			}
+		}
+	}
+
+	return mostScoreCustomer
+}
+```
+
+## usecase 3.
+
+```json
+{
+    "id": 1,
+    "name": "Ivan",
+    "surname": "Ivanov",
+    "address": {
+        "land": "Russia",
+        "city": "Moscow",
+        "district": "Butovo"
+    },
+    "phones": [
+        {
+            "operator": "MTS",
+            "number": 89850000001
+        },
+        {
+            "operator": "МегаФон",
+            "number": 89850000001
+        }
+    ],
+    "scores": {
+        "score_1": [
+            1,
+            2,
+            3
+        ],
+        "score_2": [
+            4,
+            5,
+            0,
+            6,
+            0
+        ]
+    }
+}
+```
+
+```go
+package usecase3
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+)
+
+// JSONParse - парсинг json в map.
+func JSONParse() {
+	// чтение файла
+	payload, err := os.ReadFile("usecase3/data/in.json")
+	if err != nil {
+		fmt.Println(err)
+	}
+	dct := make(map[string]interface{}) // инициализация мапы
+	if err := json.Unmarshal(payload, &dct); err != nil { // парсинг
+		fmt.Println(err)
+	}
+	fmt.Println(dct)
+	fmt.Println(dct["name"].(string))
+    fmt.Println(dct["phones"].([]interface{})[0]) // это костыль!!
+	fmt.Println(dct["phones"][0]) // ошибка. Пустой интерфейс!
+    // поэтому парсим ТОЛЬКО в структуры!
+}
+```
 
 
