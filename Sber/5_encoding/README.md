@@ -1836,3 +1836,676 @@ Content-Type: application/json
 
 # Сторонние сериализаторы
 
+Помимо стандартной библиотеки, для Go существует множество сторонних пакетов для сериализации данных. Для хранения манифестов и конфигураций чаще всего используются форматы YAML и TOML. А для передачи данных при RPC-взаимодействии сервисов — Protobuf, JSON и MessagePack. В этом уроке поговорим про несколько пакетов для работы с этими форматами.
+
+Для примера возьмём биржевой сервис, который содержит информацию о счетах пользователей в разных валютах. Рассмотрим, как сериализуются одни и те же данные при использовании разных пакетов.
+
+Определим типы `AccountBalance` и `CurrencyAmount`, которые содержат информацию о балансе пользователя. В текущей версии у этих типов нет структурных тегов:
+```go
+// AccountBalance содержит анонимизированную информацию о балансе аккаунта.
+type AccountBalance struct {
+    AccountIdHash []byte           // хеш идентификатора пользователя
+    Amounts       []CurrencyAmount // балансы в разных валютах
+    IsBlocked     bool             // флаг блокировки аккаунта
+}
+
+// CurrencyAmount содержит нормированное представление баланса.
+// 1.50$ -> { Amount: 150, Decimals: 2, Symbol: "$" }.
+type CurrencyAmount struct {
+    Amount   int64  // нормальное значение баланса
+    Decimals int8   // количество цифр после запятой
+    Symbol   string // идентификатор валюты
+}
+```
+
+![](./assets/images/currency.png)
+
+## YAML
+
+Компактный формат YAML (YAML Ain’t Markup Language) часто применяется как язык описания конфигурации приложения. Для работы с этим форматом воспользуемся пакетом [go-yaml](https://pkg.go.dev/gopkg.in/yaml.v3). 
+
+Библиотека `go-yaml` использует рефлексию для получения метаданных о типе. Чтобы задать опции для поля структуры, применяют структурные теги `yaml`:
+```go
+type MyType struct {
+    ID    int      `yaml:"id"`
+    Title string   `yaml:"title,omitempty"`
+    List  []string `yaml:"name,flow"`
+}
+```
+
+Вначале идёт имя поля в YAML-представлении. Если оно не указано, будет использовано имя поля структуры. Чтобы проигнорировать поле при сериализации, нужно, как и в JSON, указать `-`. 
+
+Далее через запятую можно перечислить опциональные параметры:
+- `omitempty` — этот флаг исключает поле из YAML-представления, если поле имеет нулевое значение (аналогично JSON, XML);
+- `flow` — при использовании этого флага для структур, слайсов и мап данные отобразятся в однострочном формате;
+- `inline` — при использовании этого флага для структур все их поля отобразятся как поля родительского объекта.
+
+Чтобы наглядно показать, как `flow` и `inline` влияют на конечный результат, приведём такой пример:
+```go
+type Leaf struct {
+    ID   int    `yaml:"id"`
+    Name string `yaml:"name"`
+}
+
+type Tree struct {
+    Owner Leaf `yaml:"owner"`
+    Left  Leaf `yaml:"left,flow"`
+    Right Leaf `yaml:"right,inline"`
+}
+
+var tree = Tree{
+    Owner: Leaf{1, "Owner"},
+    Left:  Leaf{2, "Left child"},
+    Right: Leaf{3, "Right child"},
+}
+```
+
+Переменная `tree` в YAML-формате будет выглядеть так:
+```yaml
+owner:
+  id: 1
+  name: Owner
+left: {id: 2, name: Left child}
+id: 3
+name: Right child
+```
+
+Как и при работе с JSON, для YAML-сериализации и десериализации используются аналогичные функции `Marshal()` и `Unmarshal()`. Также есть типы `Encoder` и `Decoder` с соответствующими методами `Encode()` и `Decode()`.
+
+Вернёмся к примеру с биржевым сервисом и покажем, как на практике реализовать сериализацию в YAML. Добавим теги `yaml` для типов `AccountBalance`, `CurrencyAmount` и преобразуем переменную `balance` в YAML-формат:
+```go
+package main
+
+import (
+	"fmt"
+
+	"gopkg.in/yaml.v3"
+)
+
+type (
+	AccountBalance struct {
+		AccountIdHash []byte           `yaml:"account_id_hash,flow"`
+		Amounts       []CurrencyAmount `yaml:"amounts,omitempty"`
+		IsBlocked     bool             `yaml:"is_blocked"`
+	}
+
+	CurrencyAmount struct {
+		Amount   int64  `yaml:"amount"`
+		Decimals int8   `yaml:"decimals"`
+		Symbol   string `yaml:"symbol"`
+	}
+)
+
+func main() {
+	balance := AccountBalance{
+		AccountIdHash: []byte{0x10, 0x20, 0x0A, 0x0B},
+		Amounts: []CurrencyAmount{
+			{Amount: 1000000, Decimals: 2, Symbol: "RUB"},
+			{Amount: 2510, Decimals: 2, Symbol: "USD"},
+		},
+		IsBlocked: true,
+	}
+
+	// преобразуем значение переменной balance в YAML-формат
+	out, err := yaml.Marshal(balance)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(string(out))
+}
+```
+
+Программа выведет данные в YAML-формате:
+```yaml
+account_id_hash: [16, 32, 10, 11]
+amounts:
+- amount: 1000000
+  decimals: 2
+  symbol: RUB
+- amount: 2510
+  decimals: 2
+  symbol: USD
+is_blocked: true
+```
+
+## TOML
+
+Формат TOML (Tom's Obvious, Minimal Language) тоже часто используют для написания конфигурационных файлов приложения. Для работы с этим форматом воспользуемся пакетом [go-toml](https://github.com/pelletier/go-toml).
+
+Пакет использует рефлексию и структурные теги `toml`, `comment` и `commented`:
+- `toml:"name,[omitempty]"` — определяет имя поля в TOML-представлении аналогично JSON, XML, YAML;
+- `comment:"Комментарий"` — добавляет комментарий с указанной строкой выше TOML-поля;
+- `commented:"true"` — комментирует поле в TOML-представлении.
+
+Внесём изменения в пример с биржевым сервисом:
+1. Импортируем `github.com/pelletier/go-toml`.
+1. Укажем для полей типов `toml`-теги.
+1. Вызовем `toml.Marshal(balance)`.
+
+```go
+package main
+
+import (
+	"fmt"
+
+	"github.com/pelletier/go-toml"
+)
+
+type (
+    AccountBalance struct {
+        AccountIdHash []byte           `toml:"account_id_hash"`
+        Amounts       []CurrencyAmount `toml:"amounts,omitempty"`
+        IsBlocked     bool             `toml:"is_blocked" comment:"Deprecated" commented:"true"`
+    }
+
+    CurrencyAmount struct {
+        Amount   int64  `toml:"amount"`
+        Decimals int8   `toml:"decimals"`
+        Symbol   string `toml:"symbol"`
+    }
+)
+
+func main() {
+	balance := AccountBalance{
+		AccountIdHash: []byte{0x10, 0x20, 0x0A, 0x0B},
+		Amounts: []CurrencyAmount{
+			{Amount: 1000000, Decimals: 2, Symbol: "RUB"},
+			{Amount: 2510, Decimals: 2, Symbol: "USD"},
+		},
+		IsBlocked: true,
+	}
+
+	// преобразуем значение переменной balance в TOML-формат
+	out, err := toml.Marshal(balance)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(string(out))
+}
+```
+
+В результате получим данные в TOML-формате:
+```toml
+account_id_hash = [16, 32, 10, 11]
+
+# Deprecated
+# is_blocked = true
+
+[[amounts]]
+  amount = 1000000
+  decimals = 2
+  symbol = "RUB"
+
+[[amounts]]
+  amount = 2510
+  decimals = 2
+  symbol = "USD"
+```
+
+YAML и TOML — похожие текстовые форматы для хранения настроек и конфигураций. Оба рассмотренных пакета содержат одинаковые методы для сериализации и десериализации данных, а выбор конкретного пакета зависит от личных предпочтений разработчика.
+
+![](./assets/images/toml_yaml.png)
+
+___
+Конвертируйте строковую константу `yamlData` в TOML-формат. Выведите результат в консоль.
+```go
+package main
+
+import (
+    "fmt"
+
+    "github.com/pelletier/go-toml"
+    "gopkg.in/yaml.v3"
+)
+
+type Data struct {
+    ID     int    `toml:"id"`
+    Name   string `toml:"name"`
+    Values []byte `toml:"values"`
+}
+
+const yamlData = `
+id: 101
+name: Gopher
+values:
+- 11
+- 22
+- 33
+`
+
+func main() {
+    // вставьте недостающий код
+    // 1) десериализуйте yamlData в переменную типа Data
+    // 2) преобразуйте полученную переменную в TOML
+    // 3) выведите в консоль результат
+    // ...
+}
+```
+Решение:
+```go
+    var v Data
+    err := yaml.Unmarshal([]byte(yamlData), &v)
+    if err != nil {
+        panic(err)
+    }
+    out, err := toml.Marshal(v)
+    if err != nil {
+        panic(err)
+    }
+    fmt.Println(string(out))
+```
+___
+
+## JSON
+
+Библиотека [easyjson](https://github.com/mailru/easyjson) производит JSON-сериализацию структур, но, в отличие от реализации из стандартной библиотеки, не использует рефлексию. Отсутствие рефлексии в JSON-сериализации (для всех форматов) значительно ускоряет операции `Marshal()` и `Unmarshal()`.
+
+При добавлении пакета через следующие команды устанавливается утилита `easyjson` (`${GOPATH}/bin/easyjson`), которая генерирует код сериализации и десериализации конкретных типов:
+```bash
+go get github.com/mailru/easyjson
+go install github.com/mailru/easyjson/...@latest
+```
+
+Для генерации кода достаточно вызвать `easyjson <file.go>` с полным или относительным путём к файлу со структурами. В директории с исходным файлом будет создан `file_easyjson.go` c нужными для конвертации методами, включая `MarshalJSON()` и `UnmarshalJSON()`. 
+
+Сгенерированный код уже содержит всю метаинформацию о конкретном типе и не тратит время на рекурсивные вызовы и чтение информации о типе через `reflect`. 
+
+**Важно**
+Утилита `easyjson` не работает для файлов в пакетах `main`.
+
+Программа `easyjson` может принимать дополнительные параметры командной строки, например:
+```bash
+easyjson -all -snake_case myjson.go
+```
+
+Здесь:
+- `-all` генерирует код для всех типов в указанном файле;
+- `-snake_case` форматирует имена JSON-полей в свой формат.
+
+Сгенерированный код реализует для типов интерфейсы `json.Marshaler` и `json.Unmarshaler`. Объект можно использовать со стандартной библиотекой (с функциями `json.MarshalIndent()`, `json.Unmarshal()` и другими). Однако разработчик `easyjson` не советует этого делать, так как `easyjson.Marshal()` отработает быстрее, чем `json.Marshal()`.
+
+Перепишем пример с использованием пакета `easyjson`:
+```go
+// myeasyjson/myjson/myjson.go
+// не забудьте запустить easyjson -all myjson.go
+package myjson
+
+type (
+    AccountBalance struct {
+        AccountIdHash []byte           `json:"account_id_hash,flow"`
+        Amounts       []CurrencyAmount `json:"amounts,omitempty"`
+        IsBlocked     bool             `json:"is_blocked"`
+    }
+
+    CurrencyAmount struct {
+        Amount   int64  `json:"amount"`
+        Decimals int8   `json:"decimals"`
+        Symbol   string `json:"symbol"`
+    }
+)
+
+// myeasyjson/main.go
+package main
+
+import (
+    "fmt"
+    "myeasyjson/myjson"
+    "github.com/mailru/easyjson"
+)
+
+func main() {
+    balance := myjson.AccountBalance{
+        AccountIdHash: []byte{0x10, 0x20, 0x0A, 0x0B},
+        Amounts: []myjson.CurrencyAmount{
+            {Amount: 1000000, Decimals: 2, Symbol: "RUB"},
+            {Amount: 2510, Decimals: 2, Symbol: "USD"},
+        },
+        IsBlocked: true,
+    }
+
+  // преобразуем значение переменной balance в JSON-формат
+    out, err := easyjson.Marshal(balance)
+    if err != nil {
+        panic(err)
+    }
+    fmt.Println(string(out))
+}
+```
+Выведет:
+```json
+{"account_id_hash":"ECAKCw==","amounts":[{"amount":1000000,"decimals":2,"symbol":"RUB"},{"amount":2510,"decimals":2,"symbol":"USD"}],"is_blocked":true}
+```
+
+Вместо непосредственного запуска `easyjson` можно воспользоваться директивой `//go:generate` и указать там запуск `easyjson` с нужными параметрами:
+```go
+package myjson
+
+//go:generate easyjson -all myjson.go
+type AccountBalance struct {
+        AccountIdHash []byte           `json:"account_id_hash,flow"`
+        Amounts       []CurrencyAmount `json:"amounts,omitempty"`
+        IsBlocked     bool             `json:"is_blocked"`
+}
+//...
+```
+
+После этого достаточно запустить команду `go generate`, которая и вызовет указанную в директиве программу.
+
+Библиотека `easyjson` подходит для случаев, когда схема данных известна заранее и не нужно производить динамическую десериализацию. Если же это необходимо, можно ограничить применение `easyjson` для статических типов, а для динамической части реализовать JSON-интерфейсы самостоятельно.
+
+У библиотеки есть ряд особенностей и ограничений, ознакомиться с которыми можно в репозитории проекта, где также есть бенчмарки и сравнение с другими решениями.
+
+___
+```go
+type S struct {
+    item int `yaml:"item" toml:"item"` 
+}
+```
+Отметьте верные утверждения.
+
+Верные:
+- Форматы TOML и YAML чаще всего используются для хранения настроек (Эти текстовые форматы удобны для отображения структурированной информации.)
+- `easyjson` понимает все JSON-теги стандартного пакета (`easyjson` совместим с `encoding/json`.)
+- Высокая скорость `easyjson` достигается за счёт предварительной генерации интерфейсов `json.Marshaler` и `json.Unmarshaler` для конкретного типа (Реализация интерфейсов `json.Marshaler` и `json.Unmarshaler` позволяет отказаться от использования рефлексии.)
+
+Неверные:
+- Поле `item` будет сериализовано пакетами YAML и TOML. (`item` — неэкспортируемое поле.)
+- `easyjson` генерирует JSON-данные меньшего размера по сравнению со стандартным сериализатором
+___
+
+## MessagePack
+
+[MessagePack](https://msgpack.org/) — это бинарный протокол сериализации, который требует предварительной генерации кода для работы с ним. По функциональности MessagePack похож на gob, но может применяться в других языках программирования, если для них есть соответствующая реализация.
+
+В примерах на Go будем использовать [msgp](https://github.com/tinylib/msgp)-реализацию протокола. Чтобы его установить, нужно вызвать `go install github.com/tinylib/msgp@latest`. 
+
+Для генерации файлов, расширяющих возможности пользовательских типов MessagePack-сериализацией, нужно добавить директиву `//go:generate msgp` перед объявлением сериализуемых типов и запустить `go generate`. Для переопределения имени поля можно указать структурные теги `msg`:
+```go
+//go:generate msgp
+type S struct {
+    Name    string `msg:"name"` // переопределение имени поля в представлении
+    Surname string              // экспортированное поле будет сериализовано даже без тега `msg`
+    Comment string `msg:"-"`    // игнорирование поля
+}
+```
+
+По умолчанию `msgp` создаёт для типов файл `<filename>_gen.go` с реализацией следующих методов: `MarshalMsg()`, `UnmarshalMsg()`, `EncodeMsg()`, `DecodeMsg()`, `Msgsize()`. Рассмотрим подробнее методы для сериализации и десериализации объектов.
+
+```go
+MarshalMsg([]byte)([]byte, error)
+```
+
+Метод `MarshalMsg()` принимает на вход слайс байт и использует его для хранения результата. Если длины буфера недостаточно, создаётся новый слайс (в примере для создания нового буфера данных передаётся `nil`).
+
+```go
+UnmarshalMsg([]byte)([]byte, error)
+```
+
+Метод `UnmarshalMsg()` принимает на вход слайс байт, содержащий сериализованные данные. Помимо ошибки, функция возвращает слайс байт с тем, что осталось после десериализации, то есть неиспользованные данные.
+
+Если в примере с биржевым сервисом сгенерировать нужный код для типов `AccountBalance` и `CurrencyAmount`, то сериализация и десериализация будут выглядеть так:
+```go
+package main
+
+import "fmt"
+
+//go:generate msgp
+
+type AccountBalance struct {
+    AccountIdHash []byte           `msg:"account_id_hash"`
+    Amounts       []CurrencyAmount `msg:"amounts"`
+    IsBlocked     bool             `msg:"is_blocked"`
+}
+
+type CurrencyAmount struct {
+    Amount   int64 // здесь не будем использовать структурные теги
+    Decimals int8
+    Symbol   string
+}
+
+func main() {
+    balance := AccountBalance{
+        AccountIdHash: []byte{0x10, 0x20, 0x0A, 0x0B},
+        Amounts: []CurrencyAmount{
+            {Amount: 1000000, Decimals: 2, Symbol: "RUB"},
+            {Amount: 2510, Decimals: 2, Symbol: "USD"},
+        },
+        IsBlocked: true,
+    }
+    // сериализуем значение переменной balance
+    msgpBz, err := balance.MarshalMsg(nil)
+    if err != nil {
+        panic(err)
+    }
+
+    var balanceCopy AccountBalance
+    // декодируем данные в переменную типа AccountBalance
+    if _, err := balanceCopy.UnmarshalMsg(msgpBz); err != nil {
+        panic(err)
+    }
+
+    // для сравнения выведем оригинальное и полученное значения
+    fmt.Printf("balanceInit: %+v\n", balance)
+    fmt.Printf("balanceCopy: %+v\n", balanceCopy)
+
+}
+```
+
+```
+balanceInit: {AccountIdHash:[16 32 10 11] Amounts:[{Amount:1000000 Decimals:2 Symbol:RUB} {Amount:2510 Decimals:2 Symbol:USD}] IsBlocked:true}
+balanceCopy: {AccountIdHash:[16 32 10 11] Amounts:[{Amount:1000000 Decimals:2 Symbol:RUB} {Amount:2510 Decimals:2 Symbol:USD}] IsBlocked:true}
+```
+
+В документации к пакету вы можете почитать о других возможностях библиотеки и об ограничениях `msgp`-реализации протокола MessagePack.
+
+___
+Посмотрите на тип:
+```go
+type User struct {
+    Name   string `msg:"name"`
+    Age    int
+    Phone  string `json:"-"`
+    Email  string `msg:"-"`
+    active bool
+}
+```
+
+Отметьте поля, которые будут сериализованы пакетом `msgp`.
+
+Верные:
+- `Name` (В теге указывается имя поля при сериализации.)
+- `Age` (По умолчанию сериализуются все экспортируемые поля.)
+
+Неверные:
+- `Phone` (Пакет не учитывает теги с именем, отличным от `msg`.)
+- `Email`
+- `active`
+___
+
+## Protocol Buffers
+
+[Protocol Buffers](https://developers.google.com/protocol-buffers) (Protobuf) — это популярный в индустрии формат бинарного представления данных от компании Google. Особенность протокола — наличие proto-файлов, которые описывают сериализуемые типы в своём формате ([proto3](https://developers.google.com/protocol-buffers/docs/proto3)).
+
+С помощью утилиты `protoc` (вот [инструкция по установке](https://grpc.io/docs/protoc-installation/)) из proto-файлов можно сгенерировать специфичный для языка код работы с сериализуемыми типами.
+
+Protobuf чаще всего применяется вместе с фреймворком [gRPC](https://grpc.io/). Эта связка позволяет реализовать бинарный RPC-протокол общения между сервисами (включая общение фронтенд-бэкенд) независимо от языков программирования, которые используются при их разработке.
+
+Утилита `protoc` помогает генерировать связующий код для разных языков программирования (C++, JavaScript, Go, Rust и других). Чтобы `protoc` генерировал код на языке Go, нужно ещё установить соответствующий плагин: `go install google.golang.org/protobuf/cmd/protoc-gen-go@latest`.
+
+В отличие от gob и MessagePack, источник информации для Protobuf — proto-описание типа, а не Go-представление структуры. Сначала нужно создать proto-файл, а затем получить из него Go-типы, с которыми будет работать приложение.
+
+При написании proto-файлов и вызовах `protoc`-утилиты важно знать структуру файлов проекта, а также его Go-путь. Допустим, есть Go-проект — `protobuf` с такой структурой каталога:
+```
+protobuf
+│   main.go // сама программа
+│
+└───proto // все Protobuf-файлы
+│     │   acc_balance.proto // proto-описание типов AccountBalance и CurrencyAmount
+```
+
+Вот так выглядит `proto3`-спецификация (файл `proto/acc_balance.proto`):
+```protobuf
+syntax = "proto3";
+
+// имя proto-пакета и версия
+// версию указывать необязательно, это общепринятый подход 
+// для версионирования спецификации
+package account.v1beta1;
+
+// опция задаёт пакет для генерируемого файла
+// файл будет создаваться в родительской директории с именем пакета main
+option go_package = "./main";
+
+// описание типа AccountBalance
+message AccountBalance {
+  bytes account_id_hash = 1;                // Go: []byte
+  bool is_blocked = 2;                      // Go: bool
+  repeated CurrencyAmount amounts = 3;      // Go: []CurrencyAmount
+}
+
+// описание типа CurrencyAmount
+message CurrencyAmount {
+  int64  amount = 1;   // Go: int64
+  int32  decimals = 2; // Go: int32 (int8 не определён спецификацией proto3)
+  string symbol = 3;   // Go: string
+}
+```
+
+Нужно перейти в родительскую директорию `protobuf` и запустить `protoc` с нужными параметрами:
+```bash
+protoc --proto_path=proto --go_opt=paths=source_relative --go_out=. proto/acc_balance.proto
+```
+
+Здесь:
+- `--proto_path` — путь до папки со всеми proto-файлами проекта. Proto-файл может импортировать другие proto-файлы, поэтому указываем для `protoc`, где искать локальные зависимости.
+- `--go_opt` — специфичные для Go опции. Опция `paths=source_relative` заставляет `protoc` использовать относительные пути для генерируемых файлов.
+- `--go_out` — путь до папки, куда `protoc` будет записывать генерируемые `.go`-файлы. Пишем рабочую папку проекта, так как при указании опции `paths=source_relative` утилита сама создаст нужные папки.
+- `proto/acc_balance.proto` — путь до исходного proto-файла. Можно передавать несколько файлов, разделённых пробелом.
+
+На выходе будет создан файл `./acc_balance.pb.go` с нужными Go-типами.
+
+Утилита `protoc` не создаёт методы `Marshal()` и `Unmarshal()` для Go-типов. Нужно добавить в зависимости проекта библиотеку [protobuf-go](https://github.com/protocolbuffers/protobuf-go), которая определяет функции для работы с Protobuf. 
+
+Вот так будет выглядеть сериализация и десериализация с Protobuf в примере с биржевым сервисом:
+```go
+package main
+
+import (
+    "fmt"
+
+    "github.com/golang/protobuf/proto"
+)
+
+func main() {
+    balance := AccountBalance{
+        AccountIdHash: []byte{0x10, 0x20, 0x0A, 0x0B},
+        Amounts: []*CurrencyAmount{
+            {Amount: 1000000, Decimals: 2, Symbol: "RUB"},
+            {Amount: 2510, Decimals: 2, Symbol: "USD"},
+        },
+        IsBlocked: true,
+    }
+
+    // сериализуем значение переменной balance
+    protoBz, err := proto.Marshal(&balance)
+    if err != nil {
+        panic(err)
+    }
+
+    var balanceCopy AccountBalance
+    // декодируем данные в новую переменную
+    if err := proto.Unmarshal(protoBz, &balanceCopy); err != nil {
+        panic(err)
+    }
+
+    // визуально сравниваем значения переменных
+    fmt.Printf("balanceInit: %s\n", balance.String())
+    fmt.Printf("balanceCopy: %s\n", balanceCopy.String())
+}
+```
+
+```
+balanceInit: account_id_hash:"\x10 \n\x0b" is_blocked:true amounts:{amount:1000000 decimals:2 symbol:"RUB"} amounts:{amount:2510 decimals:2 symbol:"USD"}
+balanceCopy: account_id_hash:"\x10 \n\x0b" is_blocked:true amounts:{amount:1000000 decimals:2 symbol:"RUB"} amounts:{amount:2510 decimals:2 symbol:"USD"}
+```
+
+**Инициализация экземпляра объекта `AccountBalance`**
+
+Go-описание типа `AccountBalance` в сгенерированном файле выглядит так:
+```go
+type AccountBalance struct {
+    state         protoimpl.MessageState
+    sizeCache     protoimpl.SizeCache
+    unknownFields protoimpl.UnknownFields
+
+    AccountIdHash []byte                 `protobuf:"bytes,1,opt,name=account_id_hash,json=accountIdHash,proto3" json:"account_id_hash,omitempty"` // Go: []byte
+    IsBlocked     bool                   `protobuf:"varint,2,opt,name=is_blocked,json=isBlocked,proto3" json:"is_blocked,omitempty"`              // Go: bool
+    Amounts       []*CurrencyAmount      `protobuf:"bytes,3,rep,name=amounts,proto3" json:"amounts,omitempty"`                                    // Go: []CurrencyAmount
+}
+```
+
+У поля `Amounts` тип `[]*CurrencyAmount`, то есть слайс указателей на `CurrencyAmount`. Любые вложенные структуры определяются Protobuf как указатели, поэтому при инициализации экземпляра созданы указатели на `CurrencyAmount`. В примере слайс указателей не согласуется с логикой приложения (эти объекты не должны быть `nullable`), но это стандартное поведение `protoc` изменить невозможно.
+
+**fmt.Printf**
+
+Утилита `protoc` создаёт для Go-типов метод `String()`, поэтому в консоль объекты выводим через `%s`, что делает консольный вывод более читаемым по сравнению с `%+v`.
+
+*В этом уроке вы прошли немалый путь в теме сторонних сериализаторов. Впереди — последний рывок: краткое повторение и финальное задание.* 
+
+*Помните: не нужно стремиться выучить всё за один раз. Разбирайтесь постепенно, пробуйте на практике и возвращайтесь к материалу при необходимости. Даже опытные разработчики регулярно открывают что-то новое в знакомых инструментах.*
+
+## Последний рывок
+
+Перечислим рассмотренные в этом уроке форматы, протоколы и пакеты для сериализации:
+- YAML и TOML — текстовые форматы для описания структурированных данных. Чаще всего применяются для хранения настроек и конфигураций. Соответствующие сериализаторы используют рефлексию и структурные теги `yaml`, `toml`.
+- `easyjson` — пакет для JSON-сериализации, требующий предварительной кодогенерации. Работает гораздо быстрее сериализатора стандартной библиотеки, потому что не использует рефлексию. Зато использует такие же структурные теги и совместим с пакетом `encoding/json`.
+- MessagePack — бинарный протокол сериализации. Имеет реализации для множества языков программирования, поэтому может использоваться для обмена данными между различными сервисами и приложениями. Пакет для Go понимает структурные теги `msg` и требует для структур кодогенерации необходимых методов.
+- Protobuf — формат бинарного представления данных, чаще всего используется во фреймворке gRPC. Есть реализации для многих языков. В отличие от всех рассмотренных выше сериализаторов, Go-структуры и необходимые методы генерируются специальной утилитой `protoc` на основе описания структур данных и методов в `proto`-файле.
+
+В общем доступе есть огромное количество разнообразных сериализаторов. Одни реализуют функциональность стандартной библиотеки (`easyjson`), другие добавляют недостающую (Protobuf, MessagePack).
+
+Выбирая аналог стандартным средствам сериализации, нужно взвешивать все за и против. Ограничения будут всегда — лучше узнать о них заранее. Например, изменение схемы данных требует регенерации Go-файлов — это стоит учитывать в тестах и добавлять шаг генерации в CI pipeline (относится к Protobuf, `easyjson` и другим).
+Изучите генерируемый сторонними утилитами код и код внешних зависимостей, чтобы понимать принцип их работы и облегчать себе жизнь, когда придёт время дебага.
+
+___
+Отметьте верные утверждения.
+
+Верные:
+- Go-типы для Protobuf-сериализации создаются автоматически из описаний в proto-файлах
+- В сериализаторах с кодогенерацией при изменении схемы данных (описания типов) требуется регенерация Go-файлов (При изменении типов требуется заново запустить кодогенерацию.)
+
+Неверные:
+- Все сериализаторы поддерживают значения структурных тегов `omitempty` и `-` (Большинство авторов стараются поддерживать общепринятые значения тега, но спецификация языка не определяет эти значения. Всегда стоит изучать документацию конкретного пакета.)
+- Все бинарные сериализаторы используют протоколы, не зависящие от языка программирования (Формат данных сериализатора gob поддерживается только языком Go.)
+___
+
+## Дополнительные материалы
+
+- [go-yaml](https://pkg.go.dev/gopkg.in/yaml.v3) — пакет для работы с YAML-форматом.
+- [yaml.org](http://yaml.org/spec/1.2/spec.html) — спецификация формата YAML.
+- [toml.io](https://toml.io/en/) — спецификация формата TOML.
+- [go-toml](https://github.com/pelletier/go-toml) — пакет для работы с TOML-форматом.
+- [easyjson](https://github.com/mailru/easyjson) — пакет для генерации кода работы с JSON-форматом без использования рефлексии.
+- [MessagePack](https://msgpack.org/) — описание и примеры использования бинарного формата MessagePack.
+- [msgp](https://github.com/tinylib/msgp) — реализация формата MessagePack для Go.
+- [Protocol Buffers](https://developers.google.com/protocol-buffers) — описание формата Protocol Buffers.
+- [proto3](https://developers.google.com/protocol-buffers/docs/proto3) — спецификация формата proto3.
+- [gRPC](https://grpc.io/) — описание фреймворка gRPC для реализации RPC-протокола общения между приложениями с форматом данных Protocol Buffers.
+- [protobuf-go](https://github.com/protocolbuffers/protobuf-go) — пакет для работы с Protocol Buffers для Go.
+
+# Что вы узнали
+
+Поздравляем! Тема `encoding` закончилась. Надеемся, она не вызвала у вас больших затруднений и вы смогли применить полученные знания в кодовом инкременте.
+
+В этой теме вы:
+- узнали, что такое структурные теги, как и для чего они используются;
+- разобрали частые ошибки при указании тегов;
+- научились применять пакеты стандартной библиотеки для сериализации и десериализации в формат JSON, XML и gob;
+- добавили поддержку JSON в свой проект;
+- изучили на практике работу с форматами YAML и TOML;
+- познакомились с двоичными форматами MessagePack и Protobuf, которые дают возможность обмениваться данными между программами на разных языках.
+
+Теория по этой теме пригодится вам в дальнейшем, даже если сейчас вы успели поработать только с некоторыми из предложенных пакетов. То ли ещё будет!
+
+![](./assets/images/evolution_map_5.png)
+
