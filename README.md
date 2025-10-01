@@ -5378,7 +5378,6 @@ func checkBrackets(text string) bool {
 		}
 	}
 	return len(stack) == 0
-
 }
 
 func main() {
@@ -5447,5 +5446,862 @@ func main() {
 	for _, v := range texts {
 		fmt.Printf("В строке '%v' скобки стоят верно: %v\n", v, checkBrackets(v))
 	}
+}
+```
+
+# multithreading
+
+## Варианты запуска функций
+```go
+package main
+
+import "fmt"
+
+func foo(arg string) {
+	fmt.Println("print from foo " + arg)
+}
+
+func main() {
+    text := "."
+
+    // 1 способ
+    foo(text)
+
+    // 2 способ
+    func(arg string) {
+        fmt.Println("print from main " + arg)
+    }(text)
+    
+    // 3 способ
+    func(arg string) {
+        foo(arg)
+    }(text)
+}
+```
+
+## Последовательное исполнение
+```go
+package main
+
+import (
+	"fmt"
+)
+
+func foo(arg string) {
+	fmt.Println("print in foo " + arg)
+}
+
+func main() {
+	text1 := "1111"
+	text2 := "222222222"
+	text3 := "333333333333333"
+
+	func() { foo(text1) }()
+	func() { foo(text2) }()
+	func() { foo(text3) }()
+}
+```
+
+## Параллельное исполнение
+```go
+package main
+
+import (
+	"fmt"
+	"time"
+)
+
+func foo(arg string) {
+	fmt.Println("print in foo " + arg)
+}
+
+func main() {
+	text1 := "1111"
+	text2 := "222222222"
+	text3 := "333333333333333"
+
+    // горутины  объявились и делишировались sheduler, а мы пошли дальше
+	go foo(text1)
+	go foo(text2)
+	go foo(text3)
+
+
+    // т.к. все горутины удаляются при закрытии main(), добавим временной нагрузки
+	time.Sleep(time.Millisecond * 300) 
+}
+```
+Аналогичная но правильная запись:
+```go
+package main
+
+import (
+	"fmt"
+	"time"
+)
+
+func foo(arg string) {
+	fmt.Println("print in foo " + arg)
+}
+
+func main() {
+	text1 := "1111"
+	text2 := "222222222"
+	text3 := "333333333333333"
+
+	go func() {
+		foo(text1)
+	}()
+	go func() {
+		foo(text2)
+	}()
+	go func() {
+		foo(text3)
+	}()
+
+	time.Sleep(time.Millisecond * 300)
+}
+```
+
+## Последовательный worker
+
+### 1 Worker
+
+```go
+package main
+
+import (
+	"fmt"
+	"math/rand"
+	"strings"
+	"time"
+)
+
+func worker(phrase string) {
+    for _, word := range strings.Fields(phrase) {
+	// for word := range strings.FieldsSeq(phrase) {
+        fmt.Printf("Phrase is: %s...\n", word)
+        dur := time.Duration(rand.Intn(500)) * time.Millisecond
+        time.Sleep(dur)
+    }
+}
+
+func main() {
+	worker("I play CS")
+}
+
+// Phrase is: I...
+// Phrase is: play...
+// Phrase is: CS...
+```
+
+### 2 Workers
+
+```go
+package main
+
+import (
+	"fmt"
+	"math/rand"
+	"strings"
+	"time"
+)
+
+func worker(id int, phrase string) {
+    for word := range strings.FieldsSeq(phrase) {
+        fmt.Printf("Worker #%d says: %s...\n", id, word)
+        dur := time.Duration(rand.Intn(500)) * time.Millisecond
+        time.Sleep(dur)
+    }
+}
+
+func main() {
+	worker(1, "I play CS")
+	worker(2, "Best game ever")
+}
+
+// Worker #1 says: I...
+// Worker #1 says: play...
+// Worker #1 says: CS...
+// Worker #2 says: Best...
+// Worker #2 says: game...
+// Worker #2 says: ever...
+```
+
+## Параллельный worker
+
+```go
+package main
+
+import (
+	"fmt"
+	"math/rand"
+	"strings"
+	"time"
+)
+
+func worker(id int, phrase string) {
+    for word := range strings.FieldsSeq(phrase) {
+        fmt.Printf("Worker #%d says: %s...\n", id, word)
+        dur := time.Duration(rand.Intn(100)) * time.Millisecond
+        time.Sleep(dur)
+    }
+}
+
+func main() {
+	go worker(1, "I play CS")
+	go worker(2, "Best game ever")
+	time.Sleep(500 * time.Millisecond)
+    // for range 1000000{}
+}
+
+// Worker #2 says: Best...
+// Worker #1 says: I...
+// Worker #1 says: play...
+// Worker #2 says: game...
+// Worker #1 says: CS...
+// Worker #2 says: ever...
+```
+
+## WG - плохой вариант
+
+```go
+package main
+
+import (
+	"fmt"
+	"math/rand"
+	"strings"
+	"sync"
+	"time"
+)
+
+func worker(wg *sync.WaitGroup, id int, phrase string) {
+    for _, word := range strings.Fields(phrase) {
+        fmt.Printf("Worker #%d says: %s...\n", id, word)
+        dur := time.Duration(rand.Intn(100)) * time.Millisecond
+        time.Sleep(dur)
+    }
+    wg.Done() // небезопасное убийство горутины
+}
+
+func main() {
+    var wg sync.WaitGroup
+
+    wg.Add(1) // создали 1 горутину
+    go worker(&wg, 1, "I play CS")
+
+    wg.Add(1) // создали еще 1 горутину
+    go worker(&wg, 2, "Best game ever")
+
+    wg.Wait() // ждем окончания всех горутин
+}
+
+// Worker #2 says: Best...
+// Worker #1 says: I...
+// Worker #2 says: game...
+// Worker #1 says: play...
+// Worker #2 says: ever...
+// Worker #1 says: CS...
+```
+
+## WG - хороший вариант
+```go
+package main
+
+import (
+	"fmt"
+	"math/rand"
+	"strings"
+	"sync"
+	"time"
+)
+
+func worker(id int, phrase string) {
+    for word := range strings.FieldsSeq(phrase) {
+        fmt.Printf("Worker #%d says: %s...\n", id, word)
+        dur := time.Duration(rand.Intn(100)) * time.Millisecond
+        time.Sleep(dur)
+    }
+}
+
+func main() {
+    var wg sync.WaitGroup
+    wg.Add(2)
+
+    go func() {
+        defer wg.Done() // отработает, даже если worker свалится с паникой
+        worker(1, "I play CS") 
+    }()
+
+    go func() {
+        defer wg.Done() // отработает, даже если worker свалится с паникой
+        worker(2, "Best game ever")
+    }()
+
+    wg.Wait()
+}
+```
+
+## GMP модель
+За оркестрацию горутин отвечат планировщик.
+В [исходном коде планировщика](https://go.dev/src/runtime/proc.go) приняты такие термины:
+
+- `G` (goroutine) — представляет собой горутину (какой-то код на Go). Даже если вы явно не используете горутины и не используете ключевое слово go, как минимум одна горутина всё же создаётся: из функции main(), с которой начинается выполнение кода.
+
+- `M` (machine) — представляет поток ОС, который может выполнять какое-то действие или бездействовать.
+
+- `P` (processor)— представляет логический процессор. Это ресурс, необходимый для выполнения кода. Количество `P`, используемых программой, настраивается с помощью переменной `GOMAXPROC` (можно указывать в переменной окружения или вызовом `runtime.GOMAXPROC(n)`. По умолчанию равно единице, часто указывают количество, равное количеству логических процессоров на машине).
+
+![](./assets/images/gmp.png)
+
+Также, в планировщике Go есть две разные очереди выполнения:
+- Глобальная очередь выполнения (`Global Run Queue` или `GRQ`),
+- Локальная очередь выполнения (`Local Run Queue` или `LRQ`).
+
+По умолчанию `G` будет добавляться в `LRQ`. Однако размер `LRQ` имеет максимальную ёмкость 256, и если `LRQ` будет заполнена, то `G` попадёт в `GRQ`. Помимо этого, горутина попадает в `GRQ` в том случае, если её выполнение на `P` было приостановлено.
+
+Каждому `P` присваивается `LRQ`, которая управляет горутинами, назначенными для выполнения в контексте `P`. Эти горутины по очереди включаются и выключаются из контекста `M`, назначенного для этого `P`. GRQ предназначена для горутин, которые не были назначены для `P`.
+
+Планировщик Go использует work stealing стратегию планирования, то есть освободившийся процессор будет искать потоки других процессоров и попробует украсть их. Что это значит?
+
+Когда `P` завершил работу, он пытается взять в работу `G` из своей `LRQ`. Если своя `LRQ` пуст, то `P` попытается украсть половину `G` из `LRQ` другого `P`. Если у него не получилось это сделать, то `P` попытается забрать `G` из `GRQ`.
+
+Минимальный размер стека, который определён в Go, — это и есть те самые 2кб. Поэтому, если вы запускаете горутину, она стартует с минимальным размером стека в 2кб, который уменьшается и увеличивается по мере необходимости.
+
+
+## Небуферизированный канал: 
+
+### Пример 1
+
+```go
+package main
+
+import "fmt"
+
+func main() {
+    // Канал создается через `make(chan тип)`
+    // и может передавать только значения указанного типа:
+    messages := make(chan string)
+
+    // Чтобы отправить значение в канал,
+    // используют синтаксис `канал <-`
+    // Отправим «пинг»:
+    go func() { messages <- "ping" }()
+
+    // Чтобы получить значение из канала,
+    // используют синтаксис `<-канал`
+    // Получим «пинг» и напечатаем его:
+    msg := <-messages
+    fmt.Println(msg)
+}
+```
+
+### Пример 2
+```go
+package main
+
+import (
+    "fmt"
+    "time"
+)
+
+func main() {
+    messages := make(chan string)
+
+    go func() {// постановка задачи sheduler
+        fmt.Println("B: Sending message...") // 2
+        messages <- "ping" // блокировка канала, пока не появится читатель с другой стороны канала           
+        fmt.Println("B: Message sent!") // 5
+    }()
+
+    fmt.Println("A: Doing some work...") // 1
+    time.Sleep(500 * time.Millisecond)
+    fmt.Println("A: Ready to receive a message...") // 3
+
+    <-messages // появился читатель с другой стороны канала
+
+    fmt.Println("A: Messege received!") // 4
+    time.Sleep(100 * time.Millisecond)
+}
+
+// A: Doing some work...
+// B: Sending message...
+// A: Ready to receive a message...
+// A: Messege received!
+// B: Message sent!
+
+```
+
+## Канал с результатами. Неверный, но рабочий код
+```go
+package main
+
+import (
+    "fmt"
+    "strings"
+    "unicode"
+)
+
+// counter хранит количество цифр в каждом слове.
+// Ключ карты - слово, а значение - количество цифр в слове.
+type counter map[string]int
+
+// countDigits считает количество цифр в слове
+func countDigits(str string) (count int) {
+    for _, char := range str {
+        if unicode.IsDigit(char) {
+            count++
+        }
+    }
+    return count
+}
+
+// countDigitsInWords считает количество цифр в словах фразы
+func countDigitsInWords(phrase string) counter {
+    words := strings.Fields(phrase)
+    counted := make(chan int)
+
+    stats := make(counter, len(words))
+    go func() {
+        for _, word := range words {
+            counted <- countDigits(word)
+        }
+    }()
+
+    // Считает значения из канала counted и заполните stats.
+    for i := range words {
+        stats[words[i]] = <-counted
+    }
+
+    return stats
+}
+
+// printStats печатает слова и количество цифр в каждом
+func printStats(stats counter) {
+    for word, count := range stats {
+        fmt.Printf("%s: %d\n", word, count)
+    }
+}
+
+func main() {
+    phrase := "0ne 1wo thr33 4068"
+    stats := countDigitsInWords(phrase)
+    printStats(stats)
+}
+
+// 0ne: 1
+// 1wo: 1
+// thr33: 2
+// 4068: 4
+```
+
+## Генератор. Замыкание
+```go
+// nextFunc возвращает следующее слово из генератора.
+type nextFunc func() string
+
+// wordGenerator возвращает генератор, который выдает слова из фразы.
+func wordGenerator(phrase string) nextFunc {
+	words := strings.Fields(phrase)
+	idx := 0
+	return func() string {
+		if idx == len(words) {
+			return ""
+		}
+		word := words[idx]
+		idx++
+		return word
+	}
+}
+
+func main() {
+	phrase := "0ne 1wo thr33 4068"
+
+	foo := wordGenerator(phrase)
+	fmt.Println(foo())
+	fmt.Println(foo())
+	fmt.Println(foo())
+	fmt.Println(foo())
+	fmt.Println(foo())
+}
+```
+
+## Простая однопоточная программа
+```go
+package main
+
+import (
+	"fmt"
+	"strings"
+	"unicode"
+)
+
+// nextFunc возвращает следующее слово из генератора.
+type nextFunc func() string
+
+// counter хранит количество цифр в каждом слове.
+// Ключ карты - слово, а значение - количество цифр в слове.
+type counter map[string]int
+
+func countDigits(str string) int {
+	count := 0
+	for _, char := range str {
+		if unicode.IsDigit(char) {
+			count++
+		}
+	}
+	return count
+}
+
+// countDigitsInWords считает количество цифр в словах,
+// выбирая очередные слова с помощью next().
+func countDigitsInWords(next nextFunc) counter {
+	stats := counter{}
+
+	for {
+		word := next()
+		if word == "" {
+			break
+		}
+		count := countDigits(word)
+		stats[word] = count
+	}
+
+	return stats
+}
+
+// wordGenerator возвращает генератор,
+// который выдает слова из фразы.
+func wordGenerator(phrase string) nextFunc {
+	words := strings.Fields(phrase)
+	idx := 0
+	return func() string {
+		if idx == len(words) {
+			return ""
+		}
+		word := words[idx]
+		idx++
+		return word
+	}
+}
+
+// printStats печатает слова и количество цифр в каждом
+func printStats(stats counter) {
+	for word, count := range stats {
+		fmt.Printf("%s: %d\n", word, count)
+	}
+}
+
+func main() {
+	phrase := "0ne 1wo thr33 4068"
+	next := wordGenerator(phrase)
+	stats := countDigitsInWords(next)
+	printStats(stats)
+}
+```
+
+## Решение с горутиной для п5
+```go
+package main
+
+import (
+	"fmt"
+	"strings"
+	"unicode"
+)
+
+// counter хранит количество цифр в каждом слове.
+// Ключ карты - слово, а значение - количество цифр в слове.
+type counter map[string]int
+
+// nextFunc возвращает следующее слово из генератора.
+type nextFunc func() string
+
+type pair struct {
+	word  string
+	count int
+}
+
+// countDigits считает количество цифр в слове
+func countDigits(str string) int {
+	var count int
+	for _, char := range str {
+		if unicode.IsDigit(char) {
+			count++
+		}
+	}
+	return count
+}
+
+// countDigitsInWords считает количество цифр в словах фразы
+func countDigitsInWords(next nextFunc) counter {
+    counted := make(chan pair)
+
+    // считаем цифры в словах
+    go func() {
+        for {
+            word := next()
+            count := countDigits(word)
+            counted <- pair{word, count}
+            if word == "" {
+                break
+            }
+        }
+    }()
+
+    // заполняем статистику по словам
+    stats := counter{}
+    for {
+        p := <-counted
+        if p.word == "" {
+            break
+        }
+        stats[p.word] = p.count
+    }
+
+    return stats
+}
+
+// wordGenerator возвращает генератор,
+// который выдает слова из фразы.
+func wordGenerator(phrase string) nextFunc {
+	words := strings.Fields(phrase)
+	idx := 0
+	return func() string {
+		if idx == len(words) {
+			return ""
+		}
+		word := words[idx]
+		idx++
+		return word
+	}
+}
+
+// printStats печатает слова и количество цифр в каждом
+func printStats(stats counter) {
+	for word, count := range stats {
+		fmt.Printf("%s: %d\n", word, count)
+	}
+}
+
+func main() {
+	phrase := "0ne 1wo thr33 4068"
+	next := wordGenerator(phrase)
+	stats := countDigitsInWords(next)
+	printStats(stats)
+}
+```
+
+## Consumer Producer
+```go
+package main
+
+import (
+	"fmt"
+	"strings"
+	"unicode"
+)
+
+// counter хранит количество цифр в каждом слове.
+// Ключ карты - слово, а значение - количество цифр в слове.
+type counter map[string]int
+
+// nextFunc возвращает следующее слово из генератора.
+type nextFunc func() string
+
+type pair struct {
+	word  string
+	count int
+}
+
+// countDigits считает количество цифр в слове
+func countDigits(str string) int {
+	var count int
+	for _, char := range str {
+		if unicode.IsDigit(char) {
+			count++
+		}
+	}
+	return count
+}
+
+// countDigitsInWords считает количество цифр в словах фразы
+func countDigitsInWords(next nextFunc) counter {
+	pending := make(chan string)
+	counted := make(chan pair)
+
+	// отправляет слова на подсчет
+	go func() {
+		for {
+			word := next()
+			pending <- word
+			if word == "" {
+				break
+			}
+		}
+	}()
+
+	// считает цифры в словах
+	go func() {
+		for {
+			word := <-pending
+			count := countDigits(word)
+			counted <- pair{word, count}
+			if word == "" {
+				break
+			}
+		}
+	}()
+
+	// заполняет stats
+	stats := counter{}
+	for {
+		p := <-counted
+		if p.word == "" {
+			break
+		}
+		stats[p.word] = p.count
+	}
+
+	return stats
+}
+
+// wordGenerator возвращает генератор,
+// который выдает слова из фразы.
+func wordGenerator(phrase string) nextFunc {
+	words := strings.Fields(phrase)
+	idx := 0
+	return func() string {
+		if idx == len(words) {
+			return ""
+		}
+		word := words[idx]
+		idx++
+		return word
+	}
+}
+
+// printStats печатает слова и количество цифр в каждом
+func printStats(stats counter) {
+	for word, count := range stats {
+		fmt.Printf("%s: %d\n", word, count)
+	}
+}
+
+func main() {
+	phrase := "0ne 1wo thr33 4068"
+	next := wordGenerator(phrase)
+	stats := countDigitsInWords(next)
+	printStats(stats)
+}
+```
+
+## Разделение логики
+```go
+package main
+
+import (
+	"fmt"
+	"strings"
+	"unicode"
+)
+
+// counter хранит количество цифр в каждом слове.
+// Ключ карты - слово, а значение - количество цифр в слове.
+type counter map[string]int
+
+// nextFunc возвращает следующее слово из генератора.
+type nextFunc func() string
+
+type pair struct {
+	word  string
+	count int
+}
+
+// countDigits считает количество цифр в слове
+func countDigits(str string) int {
+	var count int
+	for _, char := range str {
+		if unicode.IsDigit(char) {
+			count++
+		}
+	}
+	return count
+}
+
+// wordGenerator возвращает генератор,
+// который выдает слова из фразы.
+func wordGenerator(phrase string) nextFunc {
+	words := strings.Fields(phrase)
+	idx := 0
+	return func() string {
+		if idx == len(words) {
+			return ""
+		}
+		word := words[idx]
+		idx++
+		return word
+	}
+}
+
+// submitWords отправляет слова на подсчет
+func submitWords(next nextFunc, out chan string) {
+	for {
+		word := next()
+		out <- word
+		if word == "" {
+			break
+		}
+	}
+}
+
+// countWords считает цифры в словах
+func countWords(in chan string, out chan pair) {
+	for {
+		word := <-in
+		count := countDigits(word)
+		out <- pair{word, count}
+		if word == "" {
+			break
+		}
+	}
+}
+
+// fillStats заполняет stats
+func fillStats(in chan pair) counter {
+	stats := counter{}
+	for {
+		p := <-in
+		if p.word == "" {
+			break
+		}
+		stats[p.word] = p.count
+	}
+	return stats
+}
+
+// countDigitsInWords считает количество цифр в словах фразы
+func countDigitsInWords(next nextFunc) counter {
+	pending := make(chan string)
+	go submitWords(next, pending)
+
+	counted := make(chan pair)
+	go countWords(pending, counted)
+
+	return fillStats(counted)
+}
+
+// printStats печатает слова и количество цифр в каждом
+func printStats(stats counter) {
+	for word, count := range stats {
+		fmt.Printf("%s: %d\n", word, count)
+	}
+}
+
+func main() {
+	phrase := "0ne 1wo thr33 4068"
+	next := wordGenerator(phrase)
+	stats := countDigitsInWords(next)
+	printStats(stats)
 }
 ```
