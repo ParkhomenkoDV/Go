@@ -70,7 +70,7 @@ package math
 import "errors"
 
 func Add(a, b int) (int, error) {
-    if a == 0 || b ==  0 {
+    if a == 0 || b == 0 {
         return 0, errors.New("arg is zero")
     }
     
@@ -385,7 +385,7 @@ func TestAdd(t *testing.T) {
 }
 ```
 
-Добавим тестовые случаи в место, указанное в `//TODO`:
+Добавим тестовые случаи в место, указанное в `// TODO`:
 ```go
 {
     name: "Test Positive",
